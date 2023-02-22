@@ -6,8 +6,7 @@ spark = SparkSession.builder.appName(
 dfEntities = spark.read.parquet("s3a path")
 dfRelations = spark.read.parquet("s3a path")
 joinedDataFrame = dfEntities.join(dfRelations, dfEntities.entity_id == dfRelations.src, "left")
-joinedDataFrame = joinedDataFrame.union(dfEntities.join(dfRelations, dfEntities.entity_id == dfRelations.dst, "left"))
-joinedDataFrame = joinedDataFrame.rdd.map(lambda x: (x.entity_id, x)).reduceByKey(lambda entity_id, entity: reduceByEntityIdToJson(entity_id,entity))
+joinedDataFrame = joinedDataFrame.rdd.groupByKey().map(lambda x: (x.entity_id, list(x[1])))
 joinedDataFrame.saveAsTextFile("s3a path")
 
 
