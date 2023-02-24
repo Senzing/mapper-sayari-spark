@@ -341,4 +341,4 @@ def reduce_by_entity_id_to_json(entityId, aggregations):
   base_json_string = orjson.dumps(json_data, option=orjson.OPT_SORT_KEYS)
   record_hash = hashlib.md5(base_json_string).hexdigest()
   #TODO: add relations parsing from aggregations array.
-  return [record_hash, base_json_string, record_id, json.dumps(json_data['RELATIONSHIPS'])]
+  return
