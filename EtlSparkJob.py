@@ -70,9 +70,9 @@ def get_extra_attribute(self, _data, _attr, _default=''):
 # will return string with json
 def reduce_by_entity_id_to_json(entityId, aggregations):
   record_id = entityId
-  aggregations[0]
   entity_type = aggregations[0]['type'].upper()
-  record_type = aggregations[0]['code_conversion_data']['ENTITY_TYPE'][entity_type]['SENZING_DEFAULT']
+  code_conversion_data = json.load(aggregations[0]['code_conversion_data'])
+  record_type = code_conversion_data['ENTITY_TYPE'][entity_type]['SENZING_DEFAULT']
   # accumulate attributes for de-duplication
   temp_data = {}
   temp_data['attribute_list'] = []
@@ -109,7 +109,7 @@ def reduce_by_entity_id_to_json(entityId, aggregations):
     name = name_data.get('value')
     if name:
       raw_name_type = get_with_default(name_data, 'context', 'other_name')[0:50].upper()
-      name_type = aggregations[0]['code_conversion_data']['NAME_TYPE'][raw_name_type]['SENZING_DEFAULT']
+      name_type = code_conversion_data['NAME_TYPE'][raw_name_type]['SENZING_DEFAULT']
       clean_name = clean_str(name)
       if clean_name not in temp_data['distinct_name_list']:
         temp_data['distinct_name_list'][clean_name] = [name_type, name]
@@ -118,7 +118,7 @@ def reduce_by_entity_id_to_json(entityId, aggregations):
     address = address_data.get('value')
     if address:
       raw_addr_type = get_extra_attribute(address_data, 'Address Type', 'other_address')[0:50].upper()
-      addr_type = aggregations[0]['code_conversion_data']['ADDRESS_TYPE'][raw_addr_type]['SENZING_DEFAULT']
+      addr_type = code_conversion_data['ADDRESS_TYPE'][raw_addr_type]['SENZING_DEFAULT']
       if not addr_type and entity_type != 'PERSON': # force unique for non-persons if not specified
         addr_type = 'BUSINESS'
       if addr_type == 'BUSINESS' and entity_type == 'PERSON':  # make sure persons do not mistakenly get unique addresses
@@ -149,8 +149,8 @@ def reduce_by_entity_id_to_json(entityId, aggregations):
     contact_value = contact_data.get('value', None)
     if contact_value:
       raw_contact_type = get_with_default(contact_data, 'type', 'unknown_contact_type')[0:50].upper()
-      senzing_attr = aggregations[0]['code_conversion_data']['CONTACT_TYPE'][raw_contact_type]['SENZING_ATTR']
-      senzing_attr_type = aggregations[0]['code_conversion_data']['CONTACT_TYPE'][raw_contact_type]['SENZING_DEFAULT']
+      senzing_attr = code_conversion_data['CONTACT_TYPE'][raw_contact_type]['SENZING_ATTR']
+      senzing_attr_type = code_conversion_data ['CONTACT_TYPE'][raw_contact_type]['SENZING_DEFAULT']
       mapped_data = {senzing_attr: contact_value}
       if senzing_attr_type:
         if senzing_attr == 'PHONE_NUMBER':
@@ -170,8 +170,8 @@ def reduce_by_entity_id_to_json(entityId, aggregations):
       else:
         idtype_counts[raw_id_type] += 1
 
-      senzing_attr = aggregations[0]['code_conversion_data']['IDENTIFIER_TYPE'][raw_id_type]['SENZING_ATTR']
-      senzing_attr_type = aggregations[0]['code_conversion_data']['IDENTIFIER_TYPE'][raw_id_type]['SENZING_DEFAULT']
+      senzing_attr = code_conversion_data ['IDENTIFIER_TYPE'][raw_id_type]['SENZING_ATTR']
+      senzing_attr_type = code_conversion_data ['IDENTIFIER_TYPE'][raw_id_type]['SENZING_DEFAULT']
 
       if senzing_attr in ('OTHER_ID', 'NATIONAL_ID', 'TAX_ID', 'DRIVERS_LICENSE', 'PASSPORT'):
         mapped_data = {senzing_attr + '_NUMBER': id_value}
@@ -198,7 +198,7 @@ def reduce_by_entity_id_to_json(entityId, aggregations):
     country_value = country_data.get('value')
     if country_value:
       raw_country_context = get_with_default(country_data, 'context', 'related_country')[0:50].upper()
-      senzing_attr = aggregations[0]['code_conversion_data']['COUNTRY_CONTEXT'][raw_country_context]['SENZING_ATTR']
+      senzing_attr = code_conversion_data['COUNTRY_CONTEXT'][raw_country_context]['SENZING_ATTR']
       if {senzing_attr: country_value} not in temp_data['attribute_list']: # can get dupes since most map to country_of_assocation
         temp_data['attribute_list'].append({senzing_attr: country_value})
 
@@ -341,8 +341,4 @@ def reduce_by_entity_id_to_json(entityId, aggregations):
   base_json_string = orjson.dumps(json_data, option=orjson.OPT_SORT_KEYS)
   record_hash = hashlib.md5(base_json_string).hexdigest()
   #TODO: add relations parsing from aggregations array.
-
-
   return [record_hash, base_json_string, record_id, json.dumps(json_data['RELATIONSHIPS'])]
-
-
