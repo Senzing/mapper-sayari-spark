@@ -12,16 +12,37 @@ resolveable_record_types.append('VESSEL')
 df_entities = spark.read.parquet("s3a path")
 df_relations = spark.read.parquet("s3a path")
 analysis_mode = False
-id_sample_size = 1000000 if analysis_mode else 100
+other_sample_size = 100
+id_sample_size = 1000000 if analysis_mode else other_sample_size
 codes_filename = ""
-joined_data_frame = df_entities.join(df_relations, df_entities.entity_id == df_relations.src, "left")
-joined_data_frame = joined_data_frame.rdd.map(lambda x: (x.entity_id, x)).groupByKey().mapValues(list).\
+code_conversion_data = {}
+joined_data_frame = df_entities.join(df_relations,
+                                     df_entities.entity_id == df_relations.src,
+                                     "left")
+joined_data_frame = joined_data_frame.rdd.map(
+  lambda x: (x.entity_id, x)).groupByKey().mapValues(list). \
   reduceByKey(lambda x, y: reduce_by_entity_id_to_json(x, y))
 joined_data_frame.saveAsTextFile("s3a path")
 
 
+def load_codes_file():
+  code_conversion_data = {}
+  unmapped_code_count = 0
+  with open(codes_filename, 'r', encoding='utf-8') as f:
+    reader = csv.DictReader(f)
+    for row in reader:
+      row['RAW_TYPE'] = row['RAW_TYPE'].upper()
+      row['RAW_CODE'] = row['RAW_CODE'].upper()
+      if row['RAW_TYPE'] not in code_conversion_data:
+        code_conversion_data[row['RAW_TYPE']] = {}
+      row['COUNT'] = 0
+      row['EXAMPLES'] = {}
+      code_conversion_data[row['RAW_TYPE']][row['RAW_CODE']] = row
+      if row['REVIEWED'].upper() != 'Y':
+        unmapped_code_count += 1
+  return code_conversion_data, unmapped_code_count,
 
-#will return string with json
-def reduce_by_entity_id_to_json(entityId,aggregations):
+
+# will return string with json
+def reduce_by_entity_id_to_json(entityId, aggregations):
   return
-
