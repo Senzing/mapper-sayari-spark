@@ -340,5 +340,21 @@ def reduce_by_entity_id_to_json(entityId, aggregations):
   # compute record hash with this data
   base_json_string = orjson.dumps(json_data, option=orjson.OPT_SORT_KEYS)
   record_hash = hashlib.md5(base_json_string).hexdigest()
-  #TODO: add relations parsing from aggregations array.
-  return
+  json_data['RELATIONSHIPS'] = [{
+    'REL_ANCHOR_DOMAIN': 'SAYARI',
+    'REL_ANCHOR_KEY': record_id
+  }]
+  relationship_count = 0
+  for relation_row in aggregations:
+    relationship_count += 1
+    rel_pointer_data = {'REL_POINTER_DOMAIN': 'SAYARI',
+                        'REL_POINTER_KEY': relation_row['dst'],
+                        'REL_POINTER_ROLE': relation_row['type']
+                        }
+    if relation_row[3]:
+      rel_pointer_data['REL_POINTER_FROM_DATE'] = relation_row['from_date']
+    if relation_row[4]:
+      rel_pointer_data['REL_POINTER_THRU_DATE'] = relation_row['to_date']
+    json_data['RELATIONSHIPS'].append(rel_pointer_data)
+  return json.dump(json_data)
+#TODO: test
