@@ -5,6 +5,7 @@ import hashlib
 import orjson
 from pyspark.sql import SparkSession
 
+
 def load_codes_file(codes_filename):
   code_conversion_data = {}
   unmapped_code_count = 0
@@ -22,7 +23,9 @@ def load_codes_file(codes_filename):
         unmapped_code_count += 1
   return code_conversion_data, unmapped_code_count,
 
-spark = SparkSession.builder.appName("Etl parquet aggregation to json").getOrCreate()
+
+spark = SparkSession.builder.appName(
+  "Etl parquet aggregation to json").getOrCreate()
 
 payload_level = ''
 punctuation_translations = str.maketrans('', '', string.punctuation)
@@ -42,15 +45,19 @@ code_conversion_data, unmapped_code_count = load_codes_file(codes_filename)
 joined_data_frame = df_entities.join(df_relations,
                                      df_entities.entity_id == df_relations.src,
                                      "left")
-joined_data_frame.withColumn("code_conversion_data", json.dump(code_conversion_data))
+joined_data_frame.withColumn("code_conversion_data",
+                             json.dump(code_conversion_data))
 joined_data_frame = joined_data_frame.rdd.map(
   lambda x: (x.entity_id, x)).groupByKey().mapValues(list). \
   reduceByKey(lambda x, y: reduce_by_entity_id_to_json(x, y))
 joined_data_frame.saveAsTextFile("s3a path")
 
+
 def clean_str(str_val):
-  #return str_val
-  return ''.join(str(str_val.translate(punctuation_translations)).split()).upper()
+  # return str_val
+  return ''.join(
+    str(str_val.translate(punctuation_translations)).split()).upper()
+
 
 def get_with_default(self, _data, _attr, _default=''):
   value = _data.get(_attr)
@@ -58,6 +65,7 @@ def get_with_default(self, _data, _attr, _default=''):
     return value
   else:
     return _default
+
 
 def get_extra_attribute(self, _data, _attr, _default=''):
   if _data.get('extra'):
@@ -67,12 +75,14 @@ def get_extra_attribute(self, _data, _attr, _default=''):
         return extra_attr[1].upper()
   return _default.upper()
 
+
 # will return string with json
 def reduce_by_entity_id_to_json(entityId, aggregations):
   record_id = entityId
   entity_type = aggregations[0]['type'].upper()
   code_conversion_data = json.load(aggregations[0]['code_conversion_data'])
-  record_type = code_conversion_data['ENTITY_TYPE'][entity_type]['SENZING_DEFAULT']
+  record_type = code_conversion_data['ENTITY_TYPE'][entity_type][
+    'SENZING_DEFAULT']
   # accumulate attributes for de-duplication
   temp_data = {}
   temp_data['attribute_list'] = []
@@ -84,20 +94,25 @@ def reduce_by_entity_id_to_json(entityId, aggregations):
 
   if aggregations[0]['label']:
     clean_name = clean_str(aggregations[0]['label'])
-    temp_data['distinct_name_list'][clean_name] = ['PRIMARY', aggregations[0]['label']]
+    temp_data['distinct_name_list'][clean_name] = ['PRIMARY',
+                                                   aggregations[0]['label']]
 
   if aggregations[0]['label_en']:
     clean_name = clean_str(aggregations[0]['label_en'])
     if clean_name not in temp_data['distinct_name_list']:
-      temp_data['distinct_name_list'][clean_name] = ['PRIMARY_EN', aggregations[0]['label_en']]
+      temp_data['distinct_name_list'][clean_name] = ['PRIMARY_EN',
+                                                     aggregations[0][
+                                                       'label_en']]
     else:
       aggregations[0].update_stat('!TRUNCATIONS', 'duplicateNames', record_id)
 
   if aggregations[0]['sanctioned']:
-    temp_data['payload_data_list'].append({"sanctioned": 'Yes' if aggregations[0]['sanctioned'] else 'No'})
+    temp_data['payload_data_list'].append(
+      {"sanctioned": 'Yes' if aggregations[0]['sanctioned'] else 'No'})
 
   if aggregations[0]['pep']:
-    temp_data['payload_data_list'].append({"pep": 'Yes' if aggregations[0]['pep'] else 'No'})
+    temp_data['payload_data_list'].append(
+      {"pep": 'Yes' if aggregations[0]['pep'] else 'No'})
 
   if aggregations[0]['closed']:
     temp_data['payload_data_list'].append({"closed": aggregations[0]['closed']})
@@ -108,8 +123,10 @@ def reduce_by_entity_id_to_json(entityId, aggregations):
   for name_data in aggregations[0]['name']:
     name = name_data.get('value')
     if name:
-      raw_name_type = get_with_default(name_data, 'context', 'other_name')[0:50].upper()
-      name_type = code_conversion_data['NAME_TYPE'][raw_name_type]['SENZING_DEFAULT']
+      raw_name_type = get_with_default(name_data, 'context', 'other_name')[
+                      0:50].upper()
+      name_type = code_conversion_data['NAME_TYPE'][raw_name_type][
+        'SENZING_DEFAULT']
       clean_name = clean_str(name)
       if clean_name not in temp_data['distinct_name_list']:
         temp_data['distinct_name_list'][clean_name] = [name_type, name]
@@ -117,9 +134,11 @@ def reduce_by_entity_id_to_json(entityId, aggregations):
   for address_data in aggregations[0]['address']:
     address = address_data.get('value')
     if address:
-      raw_addr_type = get_extra_attribute(address_data, 'Address Type', 'other_address')[0:50].upper()
-      addr_type = code_conversion_data['ADDRESS_TYPE'][raw_addr_type]['SENZING_DEFAULT']
-      if not addr_type and entity_type != 'PERSON': # force unique for non-persons if not specified
+      raw_addr_type = get_extra_attribute(address_data, 'Address Type',
+                                          'other_address')[0:50].upper()
+      addr_type = code_conversion_data['ADDRESS_TYPE'][raw_addr_type][
+        'SENZING_DEFAULT']
+      if not addr_type and entity_type != 'PERSON':  # force unique for non-persons if not specified
         addr_type = 'BUSINESS'
       if addr_type == 'BUSINESS' and entity_type == 'PERSON':  # make sure persons do not mistakenly get unique addresses
         addr_type = raw_addr_type
@@ -148,9 +167,13 @@ def reduce_by_entity_id_to_json(entityId, aggregations):
   for contact_data in aggregations[0]['contact']:
     contact_value = contact_data.get('value', None)
     if contact_value:
-      raw_contact_type = get_with_default(contact_data, 'type', 'unknown_contact_type')[0:50].upper()
-      senzing_attr = code_conversion_data['CONTACT_TYPE'][raw_contact_type]['SENZING_ATTR']
-      senzing_attr_type = code_conversion_data ['CONTACT_TYPE'][raw_contact_type]['SENZING_DEFAULT']
+      raw_contact_type = get_with_default(contact_data, 'type',
+                                          'unknown_contact_type')[0:50].upper()
+      senzing_attr = code_conversion_data['CONTACT_TYPE'][raw_contact_type][
+        'SENZING_ATTR']
+      senzing_attr_type = \
+        code_conversion_data['CONTACT_TYPE'][raw_contact_type][
+          'SENZING_DEFAULT']
       mapped_data = {senzing_attr: contact_value}
       if senzing_attr_type:
         if senzing_attr == 'PHONE_NUMBER':
@@ -164,23 +187,28 @@ def reduce_by_entity_id_to_json(entityId, aggregations):
   for identifier_data in aggregations[0]['identifier']:
     id_value = identifier_data.get('value', None)
     if id_value:
-      raw_id_type = get_with_default(identifier_data, 'type', 'unknown_id')[0:50].upper()
+      raw_id_type = get_with_default(identifier_data, 'type', 'unknown_id')[
+                    0:50].upper()
       if raw_id_type not in idtype_counts:
         idtype_counts[raw_id_type] = 1
       else:
         idtype_counts[raw_id_type] += 1
 
-      senzing_attr = code_conversion_data ['IDENTIFIER_TYPE'][raw_id_type]['SENZING_ATTR']
-      senzing_attr_type = code_conversion_data ['IDENTIFIER_TYPE'][raw_id_type]['SENZING_DEFAULT']
+      senzing_attr = code_conversion_data['IDENTIFIER_TYPE'][raw_id_type][
+        'SENZING_ATTR']
+      senzing_attr_type = code_conversion_data['IDENTIFIER_TYPE'][raw_id_type][
+        'SENZING_DEFAULT']
 
-      if senzing_attr in ('OTHER_ID', 'NATIONAL_ID', 'TAX_ID', 'DRIVERS_LICENSE', 'PASSPORT'):
+      if senzing_attr in (
+          'OTHER_ID', 'NATIONAL_ID', 'TAX_ID', 'DRIVERS_LICENSE', 'PASSPORT'):
         mapped_data = {senzing_attr + '_NUMBER': id_value}
         if senzing_attr_type:
           if senzing_attr != 'DRIVERS_LICENSE':
             mapped_data[senzing_attr + '_COUNTRY'] = senzing_attr_type
           else:
             mapped_data[senzing_attr + '_STATE'] = senzing_attr_type
-        if senzing_attr in ('OTHER_ID', 'NATIONAL_ID'): #--, 'NATIONAL_ID') not an attribute at this time
+        if senzing_attr in ('OTHER_ID',
+                            'NATIONAL_ID'):  # --, 'NATIONAL_ID') not an attribute at this time
           mapped_data[senzing_attr + '_TYPE'] = raw_id_type
         temp_data['identifier_list'].append(mapped_data)
       elif senzing_attr:
@@ -192,14 +220,16 @@ def reduce_by_entity_id_to_json(entityId, aggregations):
         # leaving its mapping blank
         temp_data['payload_data_list'].append({raw_id_type: id_value})
 
-
-
   for country_data in aggregations[0]['country']:
     country_value = country_data.get('value')
     if country_value:
-      raw_country_context = get_with_default(country_data, 'context', 'related_country')[0:50].upper()
-      senzing_attr = code_conversion_data['COUNTRY_CONTEXT'][raw_country_context]['SENZING_ATTR']
-      if {senzing_attr: country_value} not in temp_data['attribute_list']: # can get dupes since most map to country_of_assocation
+      raw_country_context = get_with_default(country_data, 'context',
+                                             'related_country')[0:50].upper()
+      senzing_attr = \
+        code_conversion_data['COUNTRY_CONTEXT'][raw_country_context][
+          'SENZING_ATTR']
+      if {senzing_attr: country_value} not in temp_data[
+        'attribute_list']:  # can get dupes since most map to country_of_assocation
         temp_data['attribute_list'].append({senzing_attr: country_value})
 
   for status_data in aggregations[0]['status']:
@@ -234,15 +264,22 @@ def reduce_by_entity_id_to_json(entityId, aggregations):
   if payload_level == 'A':
 
     if aggregations[0]['num_documents']:
-      aggregations[0]['payload_data_list'].append({"num_documents": aggregations[0]['num_documents']})
+      aggregations[0]['payload_data_list'].append(
+        {"num_documents": aggregations[0]['num_documents']})
 
     if aggregations[0]['degree']:
-      temp_data['payload_data_list'].append({"degree": aggregations[0]['degree']})
+      temp_data['payload_data_list'].append(
+        {"degree": aggregations[0]['degree']})
 
     if aggregations[0]['risk_factors']:
       for risk_factor_key in aggregations[0]['risk_factors'].keys():
         if aggregations[0]['risk_factors'][risk_factor_key].get('value'):
-          temp_data['payload_data_list'].append({f"risk_factor-{risk_factor_key}": aggregations[0]['risk_factors'][risk_factor_key].get('value')})
+          temp_data['payload_data_list'].append({
+            f"risk_factor-{risk_factor_key}":
+              aggregations[0][
+                'risk_factors'][
+                risk_factor_key].get(
+                'value')})
 
     if aggregations[0]['edge_counts']:
       for edge_data in aggregations[0]['edge_counts']:
@@ -250,7 +287,8 @@ def reduce_by_entity_id_to_json(entityId, aggregations):
           cnt_in = edge_data[1].get('in', 0)
           cnt_out = edge_data[1].get('out', 0)
           cnt_tot = edge_data[1].get('total', 0)
-          temp_data['payload_data_list'].append({f"edge-{edge_data[0]}": f"{cnt_in} in, {cnt_out} out"})
+          temp_data['payload_data_list'].append(
+            {f"edge-{edge_data[0]}": f"{cnt_in} in, {cnt_out} out"})
 
     for additional_data in aggregations[0]['additional_information']:
       adtype = additional_data.get('type')
@@ -300,13 +338,14 @@ def reduce_by_entity_id_to_json(entityId, aggregations):
       this_type, this_name = temp_data['distinct_name_list'][clean_name]
       if not this_type:
         this_type = 'ADDITIONAL'
-      if len(this_name.split()) > 15: # ignores names with more than 15 tokens
-        #update_stat('TRUNCATIONS', 'longNameCnt', record_id + ' [' + this_name + ']')
+      if len(this_name.split()) > 15:  # ignores names with more than 15 tokens
+        # update_stat('TRUNCATIONS', 'longNameCnt', record_id + ' [' + this_name + ']')
         this_name = ' '.join(this_name.split()[:14]) + ' <truncated>'
       else:
-        json_data['NAME_LIST'].append({'NAME_TYPE': this_type, name_attr: this_name})
+        json_data['NAME_LIST'].append(
+          {'NAME_TYPE': this_type, name_attr: this_name})
     if len(json_data['NAME_LIST']) > 25:
-      #update_stat('TRUNCATIONS', 'tooManyNames', record_id + ' [' + str(len(temp_data['distinct_name_list'])) + ']')
+      # update_stat('TRUNCATIONS', 'tooManyNames', record_id + ' [' + str(len(temp_data['distinct_name_list'])) + ']')
       json_data['NAME_LIST'] = json_data['NAME_LIST'][0:25]
     json_data['NAME_LIST'] = json_data['NAME_LIST']
 
@@ -316,10 +355,11 @@ def reduce_by_entity_id_to_json(entityId, aggregations):
       this_type, this_addr = temp_data['distinct_addr_list'][clean_addr]
       if not this_type:
         this_type = default_addr_label
-        if record_type != 'ORGANIZATION': # all organization addresses should remain BUSINESS
+        if record_type != 'ORGANIZATION':  # all organization addresses should remain BUSINESS
           default_addr_label = 'ADDITIONAL'
 
-      json_data['ADDRESS_LIST'].append({'ADDR_TYPE': this_type, 'ADDR_FULL': this_addr})
+      json_data['ADDRESS_LIST'].append(
+        {'ADDR_TYPE': this_type, 'ADDR_FULL': this_addr})
     json_data['ADDRESS_LIST'] = json_data['ADDRESS_LIST']
 
   if temp_data['attribute_list']:
@@ -335,7 +375,8 @@ def reduce_by_entity_id_to_json(entityId, aggregations):
       if attr_name not in json_data:
         json_data[attr_name] = payload_attribute[attr_name]
       elif str(payload_attribute[attr_name]) not in str(json_data[attr_name]):
-        json_data[attr_name] = str(json_data[attr_name]) + ' | ' + str(payload_attribute[attr_name])
+        json_data[attr_name] = str(json_data[attr_name]) + ' | ' + str(
+          payload_attribute[attr_name])
 
   # compute record hash with this data
   base_json_string = orjson.dumps(json_data, option=orjson.OPT_SORT_KEYS)
@@ -357,4 +398,3 @@ def reduce_by_entity_id_to_json(entityId, aggregations):
       rel_pointer_data['REL_POINTER_THRU_DATE'] = relation_row['to_date']
     json_data['RELATIONSHIPS'].append(rel_pointer_data)
   return json.dump(json_data)
-#TODO: test
