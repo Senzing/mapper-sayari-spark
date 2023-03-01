@@ -5,7 +5,7 @@ import hashlib
 import orjson
 from pyspark.sql import SparkSession
 
-
+punctuation_translations = str.maketrans('', '', string.punctuation)
 def load_codes_file(codes_filename):
   code_conversion_data = {}
   unmapped_code_count = 0
@@ -24,39 +24,9 @@ def load_codes_file(codes_filename):
   return code_conversion_data, unmapped_code_count,
 
 
-spark = SparkSession.builder.appName(
-  "Etl parquet aggregation to json").getOrCreate()
-
-payload_level = ''
-punctuation_translations = str.maketrans('', '', string.punctuation)
-resolveable_record_types = []
-resolveable_record_types.append('PERSON')
-resolveable_record_types.append('COMPANY')
-resolveable_record_types.append('AIRCRAFT')
-resolveable_record_types.append('VESSEL')
-# with s3a:// prefix
-df_entities = spark.read.parquet("s3a path")
-df_relations = spark.read.parquet("s3a path")
-analysis_mode = False
-other_sample_size = 100
-id_sample_size = 1000000 if analysis_mode else other_sample_size
-codes_filename = ""
-code_conversion_data, unmapped_code_count = load_codes_file(codes_filename)
-joined_data_frame = df_entities.join(df_relations,
-                                     df_entities.entity_id == df_relations.src,
-                                     "left")
-joined_data_frame.withColumn("code_conversion_data",
-                             json.dump(code_conversion_data))
-joined_data_frame = joined_data_frame.rdd.map(
-  lambda x: (x.entity_id, x)).groupByKey().mapValues(list). \
-  reduceByKey(lambda x, y: reduce_by_entity_id_to_json(x, y))
-joined_data_frame.saveAsTextFile("s3a path")
-
-
 def clean_str(str_val):
   # return str_val
-  return ''.join(
-    str(str_val.translate(punctuation_translations)).split()).upper()
+  return ''.join(str(str_val.translate(punctuation_translations)).split()).upper()
 
 
 def get_with_default(self, _data, _attr, _default=''):
@@ -286,7 +256,6 @@ def reduce_by_entity_id_to_json(entityId, aggregations):
         if edge_data[0]:
           cnt_in = edge_data[1].get('in', 0)
           cnt_out = edge_data[1].get('out', 0)
-          cnt_tot = edge_data[1].get('total', 0)
           temp_data['payload_data_list'].append(
             {f"edge-{edge_data[0]}": f"{cnt_in} in, {cnt_out} out"})
 
@@ -299,7 +268,6 @@ def reduce_by_entity_id_to_json(entityId, aggregations):
     for finance_data in aggregations[0]['finances']:
       value = finance_data.get('value')
       context = finance_data.get('context')
-      sdtype = finance_data.get('type')
       currency = finance_data.get('currency')
       if context and value:
         if currency:
@@ -308,8 +276,6 @@ def reduce_by_entity_id_to_json(entityId, aggregations):
 
     for share_data in aggregations[0]['shares']:
       num_shares = share_data.get('num_shares')
-      monetary_value = share_data.get('monetary_value')
-      currency = share_data.get('currency')
       shtype = share_data.get('type')
       percentage = share_data.get('percentage')
       if shtype and num_shares:
@@ -398,3 +364,22 @@ def reduce_by_entity_id_to_json(entityId, aggregations):
       rel_pointer_data['REL_POINTER_THRU_DATE'] = relation_row['to_date']
     json_data['RELATIONSHIPS'].append(rel_pointer_data)
   return json.dump(json_data)
+
+if __name__ == "__main__":
+  spark = SparkSession.builder.appName(
+    "Etl parquet aggregation to json").getOrCreate()
+
+  payload_level = ''
+  # with s3a:// prefix
+  df_entities = spark.read.parquet("s3a path")
+  df_relations = spark.read.parquet("s3a path")
+  analysis_mode = False
+  other_sample_size = 100
+  id_sample_size = 1000000 if analysis_mode else other_sample_size
+  codes_filename = ""
+  code_conversion_data, unmapped_code_count = load_codes_file(codes_filename)
+  joined_data_frame = df_entities.join(df_relations, df_entities.entity_id == df_relations.src, "left")
+  joined_data_frame.withColumn("code_conversion_data", json.dump(code_conversion_data))
+  joined_data_frame = joined_data_frame.rdd.map( lambda x: (x.entity_id, x)).groupByKey().mapValues(list).\
+    reduceByKey(lambda x, y: reduce_by_entity_id_to_json(x, y))
+  joined_data_frame.saveAsTextFile("s3a path")
