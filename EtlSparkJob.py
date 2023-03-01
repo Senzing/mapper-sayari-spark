@@ -3,6 +3,7 @@ import json
 import string
 import hashlib
 import orjson
+import sys
 from pyspark.sql import SparkSession
 
 punctuation_translations = str.maketrans('', '', string.punctuation)
@@ -375,8 +376,8 @@ if __name__ == "__main__":
 
   payload_level = ''
   # with s3a:// prefix
-  df_entities = spark.read.parquet("s3a path")
-  df_relations = spark.read.parquet("s3a path")
+  df_entities = spark.read.parquet(sys.argv[1])
+  df_relations = spark.read.parquet(sys.argv[2])
   analysis_mode = False
   other_sample_size = 100
   id_sample_size = 1000000 if analysis_mode else other_sample_size
@@ -390,4 +391,4 @@ if __name__ == "__main__":
   joined_data_frame = joined_data_frame.rdd.map(
     lambda x: (x.entity_id, x)).groupByKey().mapValues(list). \
     reduceByKey(lambda x, y: reduce_by_entity_id_to_json(x, y))
-  joined_data_frame.saveAsTextFile("s3a path")
+  joined_data_frame.saveAsTextFile(sys.argv[3])
