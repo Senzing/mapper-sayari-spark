@@ -6,6 +6,8 @@ import orjson
 from pyspark.sql import SparkSession
 
 punctuation_translations = str.maketrans('', '', string.punctuation)
+
+
 def load_codes_file(codes_filename):
   code_conversion_data = {}
   unmapped_code_count = 0
@@ -26,7 +28,8 @@ def load_codes_file(codes_filename):
 
 def clean_str(str_val):
   # return str_val
-  return ''.join(str(str_val.translate(punctuation_translations)).split()).upper()
+  return ''.join(
+    str(str_val.translate(punctuation_translations)).split()).upper()
 
 
 def get_with_default(self, _data, _attr, _default=''):
@@ -365,6 +368,7 @@ def reduce_by_entity_id_to_json(entityId, aggregations):
     json_data['RELATIONSHIPS'].append(rel_pointer_data)
   return json.dump(json_data)
 
+
 if __name__ == "__main__":
   spark = SparkSession.builder.appName(
     "Etl parquet aggregation to json").getOrCreate()
@@ -378,8 +382,12 @@ if __name__ == "__main__":
   id_sample_size = 1000000 if analysis_mode else other_sample_size
   codes_filename = ""
   code_conversion_data, unmapped_code_count = load_codes_file(codes_filename)
-  joined_data_frame = df_entities.join(df_relations, df_entities.entity_id == df_relations.src, "left")
-  joined_data_frame.withColumn("code_conversion_data", json.dump(code_conversion_data))
-  joined_data_frame = joined_data_frame.rdd.map( lambda x: (x.entity_id, x)).groupByKey().mapValues(list).\
+  joined_data_frame = df_entities.join(df_relations,
+                                       df_entities.entity_id == df_relations.src,
+                                       "left")
+  joined_data_frame.withColumn("code_conversion_data",
+                               json.dump(code_conversion_data))
+  joined_data_frame = joined_data_frame.rdd.map(
+    lambda x: (x.entity_id, x)).groupByKey().mapValues(list). \
     reduceByKey(lambda x, y: reduce_by_entity_id_to_json(x, y))
   joined_data_frame.saveAsTextFile("s3a path")
