@@ -381,7 +381,7 @@ if __name__ == "__main__":
   analysis_mode = False
   other_sample_size = 100
   id_sample_size = 1000000 if analysis_mode else other_sample_size
-  codes_filename = ""
+  codes_filename = sys.argv[3]
   code_conversion_data, unmapped_code_count = load_codes_file(codes_filename)
   joined_data_frame = df_entities.join(df_relations,
                                        df_entities.entity_id == df_relations.src,
@@ -391,4 +391,4 @@ if __name__ == "__main__":
   joined_data_frame = joined_data_frame.rdd.map(
     lambda x: (x.entity_id, x)).groupByKey().mapValues(list). \
     reduceByKey(lambda x, y: reduce_by_entity_id_to_json(x, y))
-  joined_data_frame.saveAsTextFile(sys.argv[3])
+  joined_data_frame.saveAsTextFile(sys.argv[4])
