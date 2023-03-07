@@ -3,6 +3,7 @@ import json
 import string
 import hashlib
 import orjson
+import boto3
 import sys
 from pyspark.sql import SparkSession
 
@@ -12,18 +13,20 @@ punctuation_translations = str.maketrans('', '', string.punctuation)
 def load_codes_file(codes_filename):
   code_conversion_data = {}
   unmapped_code_count = 0
-  with open(codes_filename, 'r', encoding='utf-8') as f:
-    reader = csv.DictReader(f)
-    for row in reader:
-      row['RAW_TYPE'] = row['RAW_TYPE'].upper()
-      row['RAW_CODE'] = row['RAW_CODE'].upper()
-      if row['RAW_TYPE'] not in code_conversion_data:
-        code_conversion_data[row['RAW_TYPE']] = {}
-      row['COUNT'] = 0
-      row['EXAMPLES'] = {}
-      code_conversion_data[row['RAW_TYPE']][row['RAW_CODE']] = row
-      if row['REVIEWED'].upper() != 'Y':
-        unmapped_code_count += 1
+  s3 = boto3.client('s3')
+  obj = s3.get_object(Bucket = 's3a://spark-mapper-test/code/sayari_codes.csv', Key='')
+  data = obj['Body'].read().decode('utf-8')
+  reader = csv.reader(data)
+  for row in reader:
+    row['RAW_TYPE'] = row['RAW_TYPE'].upper()
+    row['RAW_CODE'] = row['RAW_CODE'].upper()
+    if row['RAW_TYPE'] not in code_conversion_data:
+      code_conversion_data[row['RAW_TYPE']] = {}
+    row['COUNT'] = 0
+    row['EXAMPLES'] = {}
+    code_conversion_data[row['RAW_TYPE']][row['RAW_CODE']] = row
+    if row['REVIEWED'].upper() != 'Y':
+      unmapped_code_count += 1
   return code_conversion_data, unmapped_code_count,
 
 
@@ -54,7 +57,8 @@ def get_extra_attribute(self, _data, _attr, _default=''):
 def reduce_by_entity_id_to_json(entityId, aggregations):
   record_id = entityId
   entity_type = aggregations[0]['type'].upper()
-  code_conversion_data = json.load(aggregations[0]['code_conversion_data'])
+  code_conversion_data = code_conversion_data_broadcast
+  payload_level = payload_level_broadcast
   record_type = code_conversion_data['ENTITY_TYPE'][entity_type][
     'SENZING_DEFAULT']
   # accumulate attributes for de-duplication
@@ -370,25 +374,28 @@ def reduce_by_entity_id_to_json(entityId, aggregations):
   return json.dump(json_data)
 
 
-if __name__ == "__main__":
-  spark = SparkSession.builder.appName(
+spark = SparkSession.builder.appName(
     "Etl parquet aggregation to json").getOrCreate()
 
-  payload_level = ''
-  # with s3a:// prefix
-  df_entities = spark.read.parquet(sys.argv[1])
-  df_relations = spark.read.parquet(sys.argv[2])
-  analysis_mode = False
-  other_sample_size = 100
-  id_sample_size = 1000000 if analysis_mode else other_sample_size
-  codes_filename = sys.argv[3]
-  code_conversion_data, unmapped_code_count = load_codes_file(codes_filename)
-  joined_data_frame = df_entities.join(df_relations,
+payload_level_temp = 'A'
+codes_filename = 's3a://spark-mapper-test/code/sayari_codes.csv'
+code_conversion_data_temp, unmapped_code_count = load_codes_file(codes_filename)
+payload_level_broadcast = spark.sparkContext.broadcast(payload_level_temp)
+code_conversion_data_broadcast = spark.sparkContext.broadcast(code_conversion_data_temp)
+# with s3a:// prefix
+df_entities = spark.read.parquet('s3a://spark-mapper-test/input/entities-example.snappy.parquet')
+df_relations = spark.read.parquet('s3a://spark-mapper-test/input/entities-example.snappy.parquet')
+analysis_mode = False
+other_sample_size = 100
+id_sample_size = 1000000 if analysis_mode else other_sample_size
+
+joined_data_frame = df_entities.join(df_relations,
                                        df_entities.entity_id == df_relations.src,
                                        "left")
-  joined_data_frame.withColumn("code_conversion_data",
+joined_data_frame = joined_data_frame.withColumn("code_conversion_data",
                                json.dump(code_conversion_data))
-  joined_data_frame = joined_data_frame.rdd.map(
+joined_data_frame = joined_data_frame.withColumn("payload_level", payload_level)
+joined_data_frame = joined_data_frame.rdd.map(
     lambda x: (x.entity_id, x)).groupByKey().mapValues(list). \
     reduceByKey(lambda x, y: reduce_by_entity_id_to_json(x, y))
-  joined_data_frame.saveAsTextFile(sys.argv[4])
+joined_data_frame.saveAsTextFile('s3a://spark-mapper-test/output/')
