@@ -5,6 +5,7 @@ import hashlib
 import orjson
 import boto3
 import sys
+from datetime import datetime
 from pyspark.sql import SparkSession
 
 punctuation_translations = str.maketrans('', '', string.punctuation)
@@ -14,9 +15,9 @@ def load_codes_file(codes_filename):
   code_conversion_data = {}
   unmapped_code_count = 0
   s3 = boto3.client('s3')
-  obj = s3.get_object(Bucket = 's3a://spark-mapper-test/code/sayari_codes.csv', Key='')
+  obj = s3.get_object(Bucket = 'spark-mapper-test', Key='code/sayari_codes.csv')
   data = obj['Body'].read().decode('utf-8')
-  reader = csv.reader(data)
+  reader = csv.DictReader(data.split('\n'), delimiter=',')
   for row in reader:
     row['RAW_TYPE'] = row['RAW_TYPE'].upper()
     row['RAW_CODE'] = row['RAW_CODE'].upper()
@@ -37,7 +38,7 @@ def clean_str(str_val):
 
 
 def get_with_default(self, _data, _attr, _default=''):
-  value = _data.get(_attr)
+  value = _data[_attr]
   if value:
     return value
   else:
@@ -45,7 +46,7 @@ def get_with_default(self, _data, _attr, _default=''):
 
 
 def get_extra_attribute(self, _data, _attr, _default=''):
-  if _data.get('extra'):
+  if _data['extra']:
     _attr = _attr.upper()
     for extra_attr in _data['extra']:
       if extra_attr[0].upper() == _attr:
@@ -88,9 +89,9 @@ def reduce_by_entity_id_to_json(entityId, aggregations):
     temp_data['payload_data_list'].append(
       {"sanctioned": 'Yes' if aggregations[0]['sanctioned'] else 'No'})
 
-  if aggregations[0]['pep']:
+  if aggregations[0]['pep']['value']:
     temp_data['payload_data_list'].append(
-      {"pep": 'Yes' if aggregations[0]['pep'] else 'No'})
+      {"pep": 'Yes' if aggregations[0]['pep']['value'] else 'No'})
 
   if aggregations[0]['closed']:
     temp_data['payload_data_list'].append({"closed": aggregations[0]['closed']})
@@ -99,9 +100,9 @@ def reduce_by_entity_id_to_json(entityId, aggregations):
     temp_data['payload_data_list'].append({"source": source})
 
   for name_data in aggregations[0]['name']:
-    name = name_data.get('value')
+    name = name_data.asDict(True)
     if name:
-      raw_name_type = get_with_default(name_data, 'context', 'other_name')[
+      raw_name_type = get_with_default(name, 'context', 'other_name')[
                       0:50].upper()
       name_type = code_conversion_data['NAME_TYPE'][raw_name_type][
         'SENZING_DEFAULT']
@@ -110,9 +111,9 @@ def reduce_by_entity_id_to_json(entityId, aggregations):
         temp_data['distinct_name_list'][clean_name] = [name_type, name]
 
   for address_data in aggregations[0]['address']:
-    address = address_data.get('value')
+    address = address_data.asDict(True)
     if address:
-      raw_addr_type = get_extra_attribute(address_data, 'Address Type',
+      raw_addr_type = get_extra_attribute(address, 'Address Type',
                                           'other_address')[0:50].upper()
       addr_type = code_conversion_data['ADDRESS_TYPE'][raw_addr_type][
         'SENZING_DEFAULT']
@@ -128,24 +129,24 @@ def reduce_by_entity_id_to_json(entityId, aggregations):
           temp_data['distinct_addr_list'][clean_addr] = [addr_type, address]
 
     # these remarks may include PII!
-    addr_remarks = get_extra_attribute(address_data, 'remarks')
+    addr_remarks = get_extra_attribute(address, 'remarks')
     if addr_remarks:
       temp_data['payload_data_list'].append({'address_remarks': addr_remarks})
 
   for dob_data in aggregations[0]['date_of_birth']:
-    dob = dob_data.get('value')
+    dob = dob_data.asDict(True)
     if dob:
       temp_data['attribute_list'].append({'DATE_OF_BIRTH': dob})
 
   for gender_data in aggregations[0]['gender']:
-    gender = gender_data.get('value')
+    gender = gender_data.asDict(True)
     if gender:
       temp_data['attribute_list'].append({'GENDER': gender})
 
   for contact_data in aggregations[0]['contact']:
-    contact_value = contact_data.get('value', None)
+    contact_value = contact_data.asDict(True)
     if contact_value:
-      raw_contact_type = get_with_default(contact_data, 'type',
+      raw_contact_type = get_with_default(contact_value, 'type',
                                           'unknown_contact_type')[0:50].upper()
       senzing_attr = code_conversion_data['CONTACT_TYPE'][raw_contact_type][
         'SENZING_ATTR']
@@ -163,9 +164,9 @@ def reduce_by_entity_id_to_json(entityId, aggregations):
 
   idtype_counts = {}
   for identifier_data in aggregations[0]['identifier']:
-    id_value = identifier_data.get('value', None)
+    id_value = identifier_data.asDict(True)
     if id_value:
-      raw_id_type = get_with_default(identifier_data, 'type', 'unknown_id')[
+      raw_id_type = get_with_default(id_value, 'type', 'unknown_id')[
                     0:50].upper()
       if raw_id_type not in idtype_counts:
         idtype_counts[raw_id_type] = 1
@@ -199,9 +200,9 @@ def reduce_by_entity_id_to_json(entityId, aggregations):
         temp_data['payload_data_list'].append({raw_id_type: id_value})
 
   for country_data in aggregations[0]['country']:
-    country_value = country_data.get('value')
+    country_value = country_data.asDict(True)
     if country_value:
-      raw_country_context = get_with_default(country_data, 'context',
+      raw_country_context = get_with_default(country_value, 'context',
                                              'related_country')[0:50].upper()
       senzing_attr = \
         code_conversion_data['COUNTRY_CONTEXT'][raw_country_context][
@@ -211,7 +212,7 @@ def reduce_by_entity_id_to_json(entityId, aggregations):
         temp_data['attribute_list'].append({senzing_attr: country_value})
 
   for status_data in aggregations[0]['status']:
-    value = status_data.get('value')
+    value = status_data.asDict(True)
     if not value:
       value = status_data.get('text')
     date = status_data.get('date')
@@ -225,13 +226,13 @@ def reduce_by_entity_id_to_json(entityId, aggregations):
       temp_data['payload_data_list'].append({status_attr: value})
 
   for company_type_data in aggregations[0]['company_type']:
-    value = company_type_data.get('value')
+    value = company_type_data.asDict(True)
     if value:
       temp_data['payload_data_list'].append({'company_type': value})
 
   for business_data in aggregations[0]['business_purpose']:
-    value = business_data.get('value')
-    code = business_data.get('code')
+    value = business_data['value']
+    code = business_data['code']
     if code and value:
       standard = business_data.get('standard')
       if standard:
@@ -242,7 +243,7 @@ def reduce_by_entity_id_to_json(entityId, aggregations):
   if payload_level == 'A':
 
     if aggregations[0]['num_documents']:
-      aggregations[0]['payload_data_list'].append(
+      temp_data['payload_data_list'].append(
         {"num_documents": aggregations[0]['num_documents']})
 
     if aggregations[0]['degree']:
@@ -250,8 +251,8 @@ def reduce_by_entity_id_to_json(entityId, aggregations):
         {"degree": aggregations[0]['degree']})
 
     if aggregations[0]['risk_factors']:
-      for risk_factor_key in aggregations[0]['risk_factors'].keys():
-        if aggregations[0]['risk_factors'][risk_factor_key].get('value'):
+      for risk_factor_key in aggregations[0]['risk_factors'].asDict(True).keys():
+        if aggregations[0]['risk_factors'][risk_factor_key]['value']:
           temp_data['payload_data_list'].append({
             f"risk_factor-{risk_factor_key}":
               aggregations[0][
@@ -274,18 +275,18 @@ def reduce_by_entity_id_to_json(entityId, aggregations):
         temp_data['payload_data_list'].append({adtype: advalue})
 
     for finance_data in aggregations[0]['finances']:
-      value = finance_data.get('value')
-      context = finance_data.get('context')
-      currency = finance_data.get('currency')
+      value = finance_data['value']
+      context = finance_data['context']
+      currency = finance_data['currency']
       if context and value:
         if currency:
           value = f"{value} {currency}"
         temp_data['payload_data_list'].append({f"finances-{context}": value})
 
     for share_data in aggregations[0]['shares']:
-      num_shares = share_data.get('num_shares')
-      shtype = share_data.get('type')
-      percentage = share_data.get('percentage')
+      num_shares = share_data['num_shares']
+      shtype = share_data['type']
+      percentage = share_data['percentage']
       if shtype and num_shares:
         if percentage:
           num_shares = f"{num_shares} ({percentage}%)"
@@ -371,7 +372,7 @@ def reduce_by_entity_id_to_json(entityId, aggregations):
     if relation_row[4]:
       rel_pointer_data['REL_POINTER_THRU_DATE'] = relation_row['to_date']
     json_data['RELATIONSHIPS'].append(rel_pointer_data)
-  return json.dump(json_data)
+  return json.dumps(json_data['RELATIONSHIPS'])
 
 
 spark = SparkSession.builder.appName(
@@ -384,7 +385,7 @@ payload_level_broadcast = spark.sparkContext.broadcast(payload_level_temp)
 code_conversion_data_broadcast = spark.sparkContext.broadcast(code_conversion_data_temp)
 # with s3a:// prefix
 df_entities = spark.read.parquet('s3a://spark-mapper-test/input/entities-example.snappy.parquet')
-df_relations = spark.read.parquet('s3a://spark-mapper-test/input/entities-example.snappy.parquet')
+df_relations = spark.read.parquet('s3a://spark-mapper-test/input/relationships-example.snappy.parquet')
 analysis_mode = False
 other_sample_size = 100
 id_sample_size = 1000000 if analysis_mode else other_sample_size
@@ -395,4 +396,4 @@ joined_data_frame = df_entities.join(df_relations,
 joined_data_frame = joined_data_frame.rdd.map(
     lambda x: (x.entity_id, x)).groupByKey().mapValues(list). \
     reduceByKey(lambda x, y: reduce_by_entity_id_to_json(x, y))
-joined_data_frame.saveAsTextFile('s3a://spark-mapper-test/output/')
+joined_data_frame.saveAsTextFile('s3a://spark-mapper-test/output/'+datetime.now().strftime('%Y/%m/%d/%H/%M/%S')+'/result.json')
